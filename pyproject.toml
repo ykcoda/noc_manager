@@ -1,7 +1,7 @@
 [project]
 name = "noc-managers"
-version = "0.1.0"
-description = "AI-powered NOC management via SolarWinds and LangChain"
+version = "0.2.0"
+description = "AI-powered NOC management via SolarWinds, vCenter, and LangChain"
 requires-python = ">=3.11"
 dependencies = [
     "streamlit>=1.42.0",
@@ -22,10 +22,14 @@ build-backend = "hatchling.build"
 packages = ["src/noc_managers"]
 
 [project.scripts]
+# Kept for backward compatibility
 noc-app = "noc_managers.app:main"
 noc-server = "noc_managers.mcp_server:main"
+# Granular entry points for each MCP server
+noc-server-solarwinds = "noc_managers.mcp_servers.solarwinds:main"
+noc-server-vcenter = "noc_managers.mcp_servers.vcenter:main"
 
-[tool.uv]
-dev-dependencies = [
+[dependency-groups]
+dev = [
     "pytest>=8.0.0",
 ]
