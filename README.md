@@ -132,7 +132,6 @@ noc_managers/
 ├── src/
 │   └── noc_managers/
 │       ├── app.py                   # Streamlit chat UI + LangChain agent
-│       ├── mcp_server.py            # Backward-compat shim → mcp_servers/solarwinds.py
 │       └── mcp_servers/
 │           ├── __init__.py
 │           ├── solarwinds.py        # SolarWinds Orion MCP server (2 tools)
