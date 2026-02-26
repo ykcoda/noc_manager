@@ -9,6 +9,14 @@ services:
       - "8501:8501"
     env_file:
       - .env
+    # Use public DNS so the container can reach api.openai.com.
+    # If SW_HOSTNAME or VC_HOSTNAME are hostnames (not IPs), set them to their
+    # IP addresses in .env instead of relying on corporate DNS here.
+    dns:
+      - 10.179.101.51
+      - 10.179.101.52
+      - 8.8.8.8
+      - 8.8.4.4
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8501/_stcore/health"]
