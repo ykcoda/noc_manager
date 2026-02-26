@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-vCenter API Diagnostic Tool for vCenter 9 Compatibility
+vCenter API Diagnostic Tool
 
-This script probes your vCenter 9 instance to identify which API endpoints
-are available and working, helping diagnose API compatibility issues.
+Probes your vCenter instance to confirm which REST API endpoints are
+available and working. All endpoints listed here are confirmed functional
+on the production vCenter 9 environment (verified Feb 2026).
 
 Usage:
-    python scripts/diagnose_vcenter_api.py
+    uv run python scripts/diagnose_vcenter_api.py
 """
 
 import os
@@ -40,22 +41,16 @@ def vcenter_session():
         finally:
             try:
                 client.delete("/api/session")
-            except:
+            except Exception:
                 pass
 
 
-def test_endpoint(client: httpx.Client, path: str, method: str = "GET", **kwargs) -> dict:
-    """Test if an endpoint exists and is accessible."""
+def test_endpoint(client: httpx.Client, path: str) -> dict:
+    """Test if an endpoint is accessible and returns HTTP 200."""
     try:
-        if method == "GET":
-            resp = client.get(path, **kwargs)
-        elif method == "POST":
-            resp = client.post(path, json={}, **kwargs)
-        else:
-            return {"status": "unknown", "code": None, "reason": "unsupported method"}
-
+        resp = client.get(path)
         return {
-            "status": "ok" if resp.status_code == 200 else "exists",
+            "status": "ok" if resp.status_code == 200 else "error",
             "code": resp.status_code,
             "reason": resp.reason_phrase,
         }
@@ -64,92 +59,99 @@ def test_endpoint(client: httpx.Client, path: str, method: str = "GET", **kwargs
 
 
 def main():
-    """Run diagnostic tests on vCenter API endpoints."""
-    print("🔍 vCenter 9 API Compatibility Diagnostic\n")
+    """Run diagnostic tests on confirmed vCenter API endpoints."""
+    print("🔍 vCenter API Endpoint Diagnostic\n")
     print(f"Target: {VC_HOSTNAME}\n")
 
-    endpoints_to_test = {
-        "Appliance Health": [
-            ("/api/appliance/health/overall", "GET"),
-            ("/api/appliance/system/version", "GET"),
-            ("/api/vcenter/appliance/health", "GET"),  # vCenter 9 alternative
-            ("/api/vcenter/appliance/system", "GET"),  # vCenter 9 alternative
+    # All endpoints confirmed working on vCenter 9 (Feb 2026)
+    working_endpoints = {
+        "Appliance System": [
+            "/api/appliance/system/version",
+            "/api/appliance/system/uptime",
         ],
-        "Event & Audit": [
-            ("/api/vcenter/event", "GET"),
-            ("/api/vcenter/audit-records", "GET"),
-            ("/api/vcenter/audit", "GET"),  # Alternative path
-            ("/api/appliance/auditlog", "GET"),  # vCenter 9 alternative
-            ("/api/appliance/event-log", "GET"),  # vCenter 9 alternative
+        "Appliance Health (partial — mem/storage only on vCenter 9)": [
+            "/api/appliance/health/mem",
+            "/api/appliance/health/storage",
         ],
-        "Sessions": [
-            ("/api/cis/session/list", "POST"),
-            ("/api/vcenter/session", "GET"),
-            ("/api/cis/session", "GET"),  # vCenter 9 alternative
-            ("/api/appliance/sessions", "GET"),  # vCenter 9 alternative
+        "Authorization (RBAC)": [
+            "/api/vcenter/authorization/roles",
+            "/api/vcenter/authorization/privileges",
         ],
-        "Tasks": [
-            ("/api/cis/tasks", "GET"),
-            ("/api/vcenter/tasks", "GET"),  # vCenter 9 alternative
+        "Inventory": [
+            "/api/vcenter/vm",
+            "/api/vcenter/host",
+            "/api/vcenter/cluster",
+            "/api/vcenter/datacenter",
+            "/api/vcenter/datastore",
+            "/api/vcenter/network",
+            "/api/vcenter/resource-pool",
         ],
-        "Authorization": [
-            ("/api/vcenter/authorization/role", "GET"),
-            ("/api/vcenter/authorization/roles", "GET"),
-            ("/api/vcenter/authorization/privilege", "GET"),
-            ("/api/vcenter/authorization/privileges", "GET"),
+        "Certificate Management": [
+            "/api/vcenter/certificate-management/vcenter/tls",
         ],
-        "VMs": [
-            ("/api/vcenter/vm", "GET"),
-        ],
-        "Hosts": [
-            ("/api/vcenter/host", "GET"),
-        ],
-        "Networks": [
-            ("/api/vcenter/vds/switch", "GET"),
-            ("/api/vcenter/vds/switches", "GET"),  # plural form
-            ("/api/vcenter/distributed-switch", "GET"),
-            ("/api/vcenter/network", "GET"),  # generic alternative
-        ],
-        "Clusters": [
-            ("/api/vcenter/cluster", "GET"),
+        "Storage Policies": [
+            "/api/vcenter/storage/policies",
         ],
     }
 
     with vcenter_session() as client:
-        for category, endpoints in endpoints_to_test.items():
+        # Get a powered-on VM ID for per-VM endpoint tests
+        vms_resp = client.get("/api/vcenter/vm")
+        all_vms = vms_resp.json() if vms_resp.status_code == 200 else []
+        vm_id = next(
+            (v["vm"] for v in all_vms if v.get("power_state") == "POWERED_ON"), None
+        )
+
+        for category, endpoints in working_endpoints.items():
             print(f"\n📋 {category}")
             print("─" * 60)
-
-            for path, method in endpoints:
-                result = test_endpoint(client, path, method=method)
-                status_icon = {
-                    "ok": "✅",
-                    "exists": "⚠️",
-                    "error": "❌",
-                    "unknown": "❓",
-                }.get(result["status"], "❓")
-
-                if method == "POST":
-                    path_display = f"{path} (POST)"
-                else:
-                    path_display = path
-
+            for path in endpoints:
+                result = test_endpoint(client, path)
+                icon = "✅" if result["status"] == "ok" else "❌"
                 code_str = f"HTTP {result['code']}" if result["code"] else "N/A"
-                reason = result["reason"]
+                print(f"{icon} {path:55s} {code_str:12s} {result['reason']}")
 
-                print(
-                    f"{status_icon} {path_display:50s} {code_str:15s} {reason}"
-                )
+        # Per-VM guest endpoints (requires VMware Tools on target VM)
+        print(f"\n📋 Per-VM Guest Endpoints (requires VMware Tools)")
+        print("─" * 60)
+        if vm_id:
+            per_vm_paths = [
+                f"/api/vcenter/vm/{vm_id}/guest/identity",
+                f"/api/vcenter/vm/{vm_id}/guest/local-filesystem",
+                f"/api/vcenter/vm/{vm_id}/guest/networking/interfaces",
+            ]
+            for path in per_vm_paths:
+                result = test_endpoint(client, path)
+                icon = "✅" if result["status"] == "ok" else "❌"
+                code_str = f"HTTP {result['code']}" if result["code"] else "N/A"
+                # Display with placeholder for readability
+                display_path = path.replace(vm_id, "<vm-id>")
+                print(f"{icon} {display_path:55s} {code_str:12s} {result['reason']}")
+        else:
+            print("  ⚠️  No powered-on VMs found — skipping per-VM tests")
 
     print("\n" + "=" * 60)
     print("🔑 Legend:")
-    print("  ✅ HTTP 200 — Endpoint working normally")
-    print("  ⚠️  HTTP 4xx/5xx — Endpoint exists but has an error")
-    print("  ❌ Connection error — Endpoint unreachable")
-    print("\n💡 Tips:")
-    print("  • Use ✅ endpoints in your queries")
-    print("  • ⚠️  endpoints may require special privileges or data")
-    print("  • Check vCenter version in Appliance Health section")
+    print("  ✅ HTTP 200 — Endpoint working")
+    print("  ❌ Non-200 or error — Endpoint unavailable")
+    print("\n📌 Known broken endpoints on vCenter 9 (do not use):")
+    broken = [
+        "/api/vcenter/event",
+        "/api/vcenter/audit-records",
+        "/api/cis/tasks",
+        "/api/cis/session/list",
+        "/api/vcenter/session",
+        "/api/vcenter/vds/switch",
+        "/api/vcenter/authorization/global-access",
+        "/api/vcenter/host/<id>/lockdown",
+        "/api/vcenter/vm/<id>/snapshot",
+        "/api/vcenter/storage/policies/compliance/vm",
+        "/api/appliance/health/overall",
+        "/api/appliance/health/cpu",
+        "/api/appliance/health/network",
+    ]
+    for path in broken:
+        print(f"  ❌ {path}")
 
 
 if __name__ == "__main__":

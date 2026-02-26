@@ -51,9 +51,7 @@ Detailed lookup:
 - get_vm_details(identifier) — full config, NIC list, disk list, and guest IPs \
 for a single VM; pass a name (exact or partial) or IP address
 
-Snapshots & cleanup:
-- list_vm_snapshots(max_age_days) — VMs that have snapshots; filter by age to \
-surface stale ones (e.g. max_age_days=7 returns snapshots older than 7 days)
+Cleanup:
 - list_powered_off_vms — all powered-off VMs; use to identify decommission \
 candidates
 
@@ -77,33 +75,16 @@ Security:
 returns OK / WARNING (<90 d) / CRITICAL (<30 d)
 
 Appliance health:
-- get_vcenter_appliance_health — VCSA subsystem health (mem/cpu/storage/network/ \
-overall), vCenter version, and uptime; requires appliance API (vCenter 7.0+)
-
-Audit & event query:
-- query_vcenter_events(user_filter, event_type_filter, hours_back, max_results) — \
-filtered vCenter event stream; filter by username, event type, or time window; \
-also returns structured audit records on vCenter 8.0+
-
-Sessions & tasks:
-- get_recent_tasks(max_tasks, include_completed) — recent vCenter task history \
-with status, progress, and error info; set include_completed=False for live tasks only
-- get_active_sessions — currently authenticated vCenter sessions (requires \
-Global.Diagnostics privilege); returns 403 error dict if privilege is absent
+- get_vcenter_appliance_health — VCSA memory and storage health, vCenter version, \
+and uptime (mem/storage only; overall/cpu/network not available on this vCenter)
 
 Security & RBAC:
 - list_roles_and_privileges — all RBAC roles with resolved human-readable privilege \
 names; covers both built-in (system) and custom roles
-- list_global_permissions — user and group → role assignments at the root inventory \
-level; covers both global-access and global-role-assignments endpoints
-- check_host_lockdown_mode — lockdown mode status (NORMAL | LOCKDOWN | STRICT) for \
-every ESXi host
 
 Network inventory:
 - list_virtual_networks — all standard port groups, DVS port groups, and opaque \
-networks; augmented with parent DVS name for distributed port groups
-- get_distributed_switch_details(dvs_id) — detailed DVS config: port count, MTU, \
-uplink names, host count; dvs_id from list_virtual_networks()
+networks; includes parent DVS switch ID for distributed port groups
 
 Capacity planning:
 - get_capacity_planning_report — cluster-level allocated CPU/memory totals and \
@@ -116,8 +97,6 @@ missing, not-running, or outdated Tools (affects guest disk % and IP reporting)
 Storage policies:
 - list_storage_policies — all SPBM storage policies (requires StorageProfile.View \
 privilege)
-- get_storage_policy_compliance — VMs non-compliant with their assigned storage \
-policy; includes compliance_status and policy_id per VM
 
 Inventory & configuration:
 - get_vcenter_inventory_summary — fleet-wide counts: datacenters, clusters, hosts, \
@@ -126,11 +105,10 @@ VMs (by power state), datastores, networks, resource pools
 reservation) for each
 
 Use vCenter tools for questions about: VM health, hypervisor hosts, datastore \
-capacity, vCenter alarms, snapshots, cluster configuration, network adapter \
-issues, certificate expiry, VMware Tools status, RBAC roles and permissions, \
-lockdown mode, storage policy compliance, capacity planning, resource pools, \
-vCenter events/audit trail, active sessions, recent tasks, appliance health, \
-distributed switches, or any query mentioning a specific VM name or IP.
+capacity, cluster configuration, network adapter issues, certificate expiry, \
+VMware Tools status, RBAC roles, storage policies, capacity planning, resource \
+pools, appliance health, virtual networks, or any query mentioning a specific \
+VM name or IP.
 
 ## Response format
 Structure every answer as:
@@ -140,19 +118,6 @@ Structure every answer as:
 
 Always call at least one tool before responding. If the question spans both \
 domains, call tools from both servers.
-
-## vCenter 9 Compatibility Note
-On vCenter 9, the following tools may return 404 errors (APIs were removed):
-- query_vcenter_events — event stream unavailable
-- get_active_sessions — session listing unavailable
-- get_recent_tasks — task history unavailable
-- get_vcenter_appliance_health — appliance health API unavailable
-- get_distributed_switch_details — DVS API deprecated
-
-These tools will return error dicts explaining the unavailability. Use available
-tools like list_vms_health, list_esxi_host_health, list_datastore_capacity,
-get_capacity_planning_report, and list_virtual_networks for comprehensive
-infrastructure observability.
 """
 
 _MCP_CONNECTIONS = {

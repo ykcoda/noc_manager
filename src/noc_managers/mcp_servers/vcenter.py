@@ -1,7 +1,7 @@
 import os
 import re
 from contextlib import contextmanager
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import httpx
 from dotenv import load_dotenv
@@ -164,45 +164,6 @@ def list_datastore_capacity() -> list:
     return result
 
 
-@mcp.tool()
-def get_recent_alarms_and_events(max_events: int = 50) -> dict:
-    """
-    Fetches recent events from vCenter via the REST API.
-
-    NOTE: Triggered alarms (active conditions) are not available via the vCenter REST API;
-    they require the SOAP AlarmManager API. This tool returns events only.
-    Use query_vcenter_events() for filtered event queries and get_recent_tasks() for
-    administrative task history.
-
-    Endpoint used:
-      - GET /api/vcenter/event  -> recent system event log entries (vCenter 7.0+)
-
-    Args:
-      max_events: maximum event log entries to return (default 50)
-
-    Returns a dict with:
-      - 'events': list of recent event objects
-      - 'note': explanation that alarms require SOAP API
-    """
-    with _vcenter_session() as client:
-        events_raw: list = []
-        try:
-            events_resp = client.get(
-                "/api/vcenter/event",
-                params={"size": max_events},
-            )
-            events_resp.raise_for_status()
-            payload = events_resp.json()
-            events_raw = payload if isinstance(payload, list) else payload.get("value", [])
-        except httpx.HTTPStatusError as exc:
-            events_raw = [{"error": f"Failed to fetch events: {exc}"}]
-
-    return {
-        "events": events_raw[:max_events],
-        "note": "Triggered alarms are not available via REST API (SOAP AlarmManager required). Use query_vcenter_events() for filtered queries.",
-    }
-
-
 # ── New tools ──────────────────────────────────────────────────────────────────
 
 @mcp.tool()
@@ -323,78 +284,6 @@ def get_vm_details(identifier: str) -> dict:
             "guest_ip_addresses": guest_interfaces,
         }
 
-
-@mcp.tool()
-def list_vm_snapshots(max_age_days: int = 0) -> list:
-    """
-    Lists VMs that currently have one or more snapshots.
-
-    Iterates all VMs and queries the snapshot tree for each. VMs without
-    snapshots are omitted from the result.
-
-    Args:
-      max_age_days: when > 0, only include snapshots older than this many days
-                    (useful to surface forgotten or stale snapshots)
-
-    Each record contains: vm_name, vm_id, snapshot_count, snapshots list
-    (name, description, create_time, state per snapshot).
-    """
-    # Validate max_age_days
-    if max_age_days < 0:
-        max_age_days = 0
-
-    cutoff = (
-        datetime.now(timezone.utc) - timedelta(days=max_age_days)
-        if max_age_days > 0
-        else None
-    )
-
-    with _vcenter_session() as client:
-        vms_resp = client.get("/api/vcenter/vm")
-        vms_resp.raise_for_status()
-        vms = vms_resp.json()
-
-        result = []
-        for vm in vms:
-            vm_id = vm.get("vm")
-            try:
-                snap_resp = client.get(f"/api/vcenter/vm/{vm_id}/snapshot")
-                if snap_resp.status_code != 200:
-                    continue
-
-                payload = snap_resp.json()
-                snapshots = payload if isinstance(payload, list) else payload.get("snapshots", [])
-
-                if cutoff:
-                    def _parse(ts: str) -> datetime:
-                        return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-                    snapshots = [
-                        s for s in snapshots
-                        if s.get("create_time") and _parse(s["create_time"]) < cutoff
-                    ]
-
-                if not snapshots:
-                    continue
-
-                result.append({
-                    "vm_name": vm.get("name"),
-                    "vm_id": vm_id,
-                    "snapshot_count": len(snapshots),
-                    "snapshots": [
-                        {
-                            "name": s.get("name"),
-                            "description": s.get("description", ""),
-                            "create_time": s.get("create_time"),
-                            "state": s.get("state"),
-                        }
-                        for s in snapshots
-                    ],
-                })
-            except Exception:
-                continue
-
-    return result
 
 
 @mcp.tool()
@@ -696,218 +585,31 @@ def get_vm_resource_usage(
 @mcp.tool()
 def get_vcenter_appliance_health() -> dict:
     """
-    Returns health status for all VCSA appliance subsystems, software version,
-    and uptime.
+    Returns available VCSA appliance health status, software version, and uptime.
 
-    Endpoints used (all under /api/appliance — available on vCenter 7.0+ VCSA only):
+    Endpoints used (confirmed working on vCenter 9):
       GET /api/appliance/health/mem     — memory subsystem health
-      GET /api/appliance/health/cpu     — CPU subsystem health
       GET /api/appliance/health/storage — storage subsystem health
-      GET /api/appliance/health/network — network subsystem health
-      GET /api/appliance/health/overall — aggregate health status
       GET /api/appliance/system/version — build, product, type, release date
       GET /api/appliance/system/uptime  — uptime in seconds (integer)
 
     Each health endpoint returns one of: green | yellow | orange | red | unknown | gray
 
-    Returns a dict with keys: mem, cpu, storage, network, overall
-    (each with a 'health' string), plus 'version' (dict) and
-    'uptime_seconds' (int or None).
+    Returns a dict with keys: mem, storage (each with a 'health' string),
+    plus 'version' (dict) and 'uptime_seconds' (int or None).
 
-    Returns {"error": ..., "status_code": ...} for individual endpoints
-    that are unavailable; other subsystems are still populated.
+    Note: health/overall, health/cpu, and health/network endpoints are not
+    available on this vCenter version.
     """
     with _vcenter_session() as client:
         return {
             "health": {
                 "mem": _safe_get(client, "/api/appliance/health/mem"),
-                "cpu": _safe_get(client, "/api/appliance/health/cpu"),
                 "storage": _safe_get(client, "/api/appliance/health/storage"),
-                "network": _safe_get(client, "/api/appliance/health/network"),
-                "overall": _safe_get(client, "/api/appliance/health/overall"),
             },
             "version": _safe_get(client, "/api/appliance/system/version"),
             "uptime_seconds": _safe_get(client, "/api/appliance/system/uptime"),
         }
-
-
-# ── Domain 2: Audit & Event Logs ─────────────────────────────────────────────────
-
-
-@mcp.tool()
-def query_vcenter_events(
-    user_filter: str = "",
-    event_type_filter: str = "",
-    hours_back: int = 24,
-    max_results: int = 100,
-) -> dict:
-    """
-    Filtered query of the vCenter event stream and (on vCenter 8.0+)
-    structured audit records.
-
-    Endpoints used:
-      GET /api/vcenter/event
-          Query params: filter.user_name, filter.types, filter.time.start,
-                        filter.time.end (ISO 8601 UTC)
-      GET /api/vcenter/audit-records   (vCenter 8.0+ only; 404 on 7.x)
-
-    Args:
-      user_filter:       Filter events by username substring (case-insensitive
-                         match applied client-side after fetch; server accepts
-                         exact principal names only).
-      event_type_filter: Filter events where the type field contains this
-                         string (e.g. 'VmPoweredOnEvent', 'UserLoginSessionEvent').
-                         Applied client-side.
-      hours_back:        Return events from this many hours ago until now
-                         (default 24, max recommended 168 to avoid timeouts).
-      max_results:       Maximum total events to return (default 100).
-
-    Returns a dict with:
-      - 'events': list of event dicts (type, created_time, user_name, message)
-      - 'audit_records': list from /api/vcenter/audit-records, or
-                         {"error": ..., "status_code": 404} on vCenter 7.x
-      - 'filter_applied': dict summarising the filters used
-    """
-    # Validate hours_back
-    hours_back = max(1, min(hours_back, 168))  # Clamp to 1-168 hours
-
-    start_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
-    start_time_str = start_time.isoformat().replace("+00:00", "Z")
-
-    params = {"filter.time.start": start_time_str}
-    if user_filter:
-        params["filter.user_name"] = user_filter
-
-    with _vcenter_session() as client:
-        # Fetch events
-        events_resp = _safe_get(client, "/api/vcenter/event", params=params)
-        if isinstance(events_resp, dict) and "error" in events_resp:
-            events = []
-        else:
-            events = (
-                events_resp
-                if isinstance(events_resp, list)
-                else events_resp.get("value", [])
-            )
-
-        # Apply client-side filters
-        filtered_events = []
-        for event in events:
-            if event_type_filter and event_type_filter.lower() not in event.get(
-                "type", ""
-            ).lower():
-                continue
-            if user_filter and user_filter.lower() not in event.get("user_name", "").lower():
-                continue
-            filtered_events.append(event)
-
-        filtered_events = filtered_events[:max_results]
-
-        # Fetch audit records (vCenter 8.0+)
-        audit_records_resp = _safe_get(client, "/api/vcenter/audit-records")
-        if isinstance(audit_records_resp, dict) and "error" in audit_records_resp:
-            audit_records = audit_records_resp
-        else:
-            audit_records = (
-                audit_records_resp
-                if isinstance(audit_records_resp, list)
-                else audit_records_resp.get("value", [])
-            )
-
-    return {
-        "events": filtered_events,
-        "audit_records": audit_records,
-        "filter_applied": {
-            "user_filter": user_filter,
-            "event_type_filter": event_type_filter,
-            "hours_back": hours_back,
-            "max_results": max_results,
-            "start_time": start_time_str,
-        },
-    }
-
-
-# ── Domain 3: Active Sessions & Recent Tasks ─────────────────────────────────────
-
-
-@mcp.tool()
-def get_recent_tasks(
-    max_tasks: int = 50,
-    include_completed: bool = True,
-) -> list:
-    """
-    Returns recent administrative tasks from the vCenter task manager.
-
-    Endpoint used:
-      GET /api/cis/tasks
-          Query params: filter.tasks.status (RUNNING | SUCCEEDED | FAILED | BLOCKED)
-
-    Args:
-      max_tasks:          Maximum number of tasks to return (default 50).
-      include_completed:  When True, include SUCCEEDED and FAILED tasks.
-                          When False, return only RUNNING and BLOCKED tasks.
-
-    Each record contains:
-      - task_id, status, description, progress (0–100),
-        start_time, end_time, error (if failed), target (object the task acted on)
-
-    Returns an empty list if the endpoint is unavailable (404/403).
-    """
-    with _vcenter_session() as client:
-        tasks_resp = _safe_get(client, "/api/cis/tasks")
-
-        if isinstance(tasks_resp, dict) and "error" in tasks_resp:
-            return []
-
-        # /api/cis/tasks returns dict keyed by task ID
-        if isinstance(tasks_resp, dict):
-            result = [{"task_id": k, **v} for k, v in tasks_resp.items()]
-        else:
-            result = tasks_resp if isinstance(tasks_resp, list) else []
-
-        # Filter by completion status
-        if not include_completed:
-            result = [t for t in result if t.get("status") in ("RUNNING", "BLOCKED")]
-
-        return result[:max_tasks]
-
-
-@mcp.tool()
-def get_active_sessions() -> list:
-    """
-    Returns currently authenticated sessions in vCenter.
-
-    Requires the Global.Diagnostics privilege to list all sessions.
-
-    Endpoint used:
-      GET /api/cis/session/list (vCenter 7.0+) or
-      GET /api/vcenter/session (fallback for current session info)
-
-    Each record contains:
-      - user, created_time, last_accessed_time, idle_time_seconds,
-        client_address, user_agent
-
-    Returns [{"error": ..., "status_code": 403}] if the authenticated
-    user lacks the required Global.Diagnostics privilege.
-    """
-    with _vcenter_session() as client:
-        # Try to list all sessions
-        sessions_resp = _safe_get(client, "/api/cis/session/list")
-
-        # Fallback to current session info if listing fails
-        if isinstance(sessions_resp, dict) and "error" in sessions_resp:
-            sessions_resp = _safe_get(client, "/api/vcenter/session")
-
-        if isinstance(sessions_resp, dict) and "error" in sessions_resp:
-            return [sessions_resp]
-
-        sessions = (
-            sessions_resp
-            if isinstance(sessions_resp, list)
-            else sessions_resp.get("value", [])
-        )
-
-        return sessions
 
 
 # ── Domain 4: Security & Access Control (RBAC) ───────────────────────────────────
@@ -979,96 +681,6 @@ def list_roles_and_privileges() -> list:
         return result
 
 
-@mcp.tool()
-def list_global_permissions() -> list:
-    """
-    Returns global permission assignments in vCenter (user or group → role
-    assignments at the root level of the inventory hierarchy).
-
-    Endpoints used:
-      GET /api/vcenter/authorization/global-access
-          or
-      GET /api/vcenter/authorization/global-role-assignments
-          (endpoint path varies by vCenter version; both are tried)
-
-    Each record contains:
-      - principal (user or group name), role_id, propagate (bool),
-        principal_type (USER | GROUP)
-
-    Returns [{"error": ..., "status_code": ...}] if both endpoints return
-    4xx (e.g. insufficient privileges or older vCenter API).
-    """
-    with _vcenter_session() as client:
-        # Try first endpoint
-        perms_resp = _safe_get(client, "/api/vcenter/authorization/global-access")
-
-        # Fallback to second endpoint if first failed
-        if isinstance(perms_resp, dict) and "error" in perms_resp:
-            perms_resp = _safe_get(
-                client, "/api/vcenter/authorization/global-role-assignments"
-            )
-
-        if isinstance(perms_resp, dict) and "error" in perms_resp:
-            return [perms_resp]
-
-        perms_list = (
-            perms_resp
-            if isinstance(perms_resp, list)
-            else perms_resp.get("value", [])
-        )
-
-        return perms_list
-
-
-@mcp.tool()
-def check_host_lockdown_mode() -> list:
-    """
-    Returns the lockdown mode status for every ESXi host in vCenter.
-
-    Endpoint used:
-      GET /api/vcenter/host/{host_id}/lockdown-mode
-          (one call per host; vCenter 7.0+)
-
-    Each record contains:
-      - host_name, host_id,
-        lockdown_mode: NORMAL | STRICT | LOCKDOWN
-        (NORMAL means lockdown is disabled; LOCKDOWN and STRICT mean it is enabled)
-
-    Hosts where the endpoint returns 404 (older API) or 403 (no privilege)
-    are included with lockdown_mode set to the error string for transparency.
-    """
-    with _vcenter_session() as client:
-        # Get all hosts
-        hosts_resp = client.get("/api/vcenter/host")
-        hosts_resp.raise_for_status()
-        hosts = hosts_resp.json()
-
-        result = []
-        for host in hosts:
-            host_id = host.get("host")
-            host_name = host.get("name")
-            lockdown_mode_resp = _safe_get(
-                client, f"/api/vcenter/host/{host_id}/lockdown"
-            )
-
-            # The endpoint returns a plain string, not a dict
-            if isinstance(lockdown_mode_resp, dict) and "error" in lockdown_mode_resp:
-                lockdown_mode = lockdown_mode_resp.get("error", "UNKNOWN")
-            elif isinstance(lockdown_mode_resp, str):
-                lockdown_mode = lockdown_mode_resp
-            else:
-                lockdown_mode = "UNKNOWN"
-
-            result.append(
-                {
-                    "host_name": host_name,
-                    "host_id": host_id,
-                    "lockdown_mode": lockdown_mode,
-                }
-            )
-
-        return result
-
 
 # ── Domain 5: Network Observability ──────────────────────────────────────────────
 
@@ -1114,48 +726,6 @@ def list_virtual_networks() -> list:
 
         return result
 
-
-@mcp.tool()
-def get_distributed_switch_details(dvs_id: str) -> dict:
-    """
-    Returns detailed configuration for a single Distributed Virtual Switch.
-
-    Note: The /api/vcenter/vds/switch endpoint was deprecated in vCenter 9.
-    This tool attempts to fetch details but may return 404 errors on newer
-    vCenter versions. Use list_virtual_networks() to enumerate DVS port groups
-    and their switch IDs instead.
-
-    Endpoint used:
-      GET /api/vcenter/vds/switch/{dvs_id} — detailed config (vCenter 7.0–8.0)
-
-    Args:
-      dvs_id: DVS managed object reference (e.g. 'dvs-15'), obtained from
-              the dvs_switch_id field of list_virtual_networks() for
-              DISTRIBUTED_PORTGROUP entries.
-
-    Returns dict with: dvs_id, name, num_ports, uplink_names, mtu,
-    discovery_protocol, num_hosts.
-
-    Returns {"error": ..., "status_code": 404} if endpoint unavailable (vCenter 9+).
-    """
-    if not dvs_id or not dvs_id.strip():
-        return {"error": "dvs_id parameter is required and cannot be empty", "status_code": None}
-
-    with _vcenter_session() as client:
-        dvs_resp = _safe_get(client, f"/api/vcenter/vds/switch/{dvs_id}")
-
-        if isinstance(dvs_resp, dict) and "error" in dvs_resp:
-            return dvs_resp
-
-        return {
-            "dvs_id": dvs_resp.get("switch"),
-            "name": dvs_resp.get("name"),
-            "num_ports": dvs_resp.get("num_ports"),
-            "uplink_names": dvs_resp.get("uplinks", []),
-            "mtu": dvs_resp.get("mtu"),
-            "discovery_protocol": dvs_resp.get("discovery_protocol"),
-            "num_hosts": len(dvs_resp.get("hosts", [])),
-        }
 
 
 # ── Domain 6: Capacity Planning ──────────────────────────────────────────────────
@@ -1427,78 +997,6 @@ def list_storage_policies() -> list:
 
         return policies
 
-
-@mcp.tool()
-def get_storage_policy_compliance() -> dict:
-    """
-    Returns VMs that are non-compliant with their assigned VM Storage Policy.
-    Non-compliant VMs may be at risk of missing storage SLAs (replication,
-    encryption, performance tiers).
-
-    Endpoint used:
-      GET /api/vcenter/storage/policies/compliance/vm
-          Returns compliance status per VM.
-
-    Returns a dict with:
-      - 'non_compliant': list of VMs with compliance_status != COMPLIANT,
-          each with: vm_id, vm_name (if resolvable), compliance_status,
-          policy_id
-      - 'compliant_count': int
-      - 'non_compliant_count': int
-      - 'unknown_count': int (VMs where compliance could not be determined)
-
-    Returns {"error": ..., "status_code": ...} if the endpoint is unavailable.
-    """
-    with _vcenter_session() as client:
-        # Fetch compliance data
-        compliance_resp = _safe_get(client, "/api/vcenter/storage/policies/compliance/vm")
-
-        if isinstance(compliance_resp, dict) and "error" in compliance_resp:
-            return compliance_resp
-
-        compliance_list = (
-            compliance_resp
-            if isinstance(compliance_resp, list)
-            else compliance_resp.get("value", [])
-        )
-
-        # Fetch VM list for name lookup
-        vms_resp = client.get("/api/vcenter/vm")
-        vms_resp.raise_for_status()
-        all_vms = vms_resp.json()
-        vm_map = {vm.get("vm"): vm.get("name") for vm in all_vms}
-
-        # Categorize by compliance status
-        compliant_count = 0
-        non_compliant_count = 0
-        unknown_count = 0
-        non_compliant_list = []
-
-        for item in compliance_list:
-            status = item.get("compliance_status", "UNKNOWN")
-
-            if status == "COMPLIANT":
-                compliant_count += 1
-            elif status == "NON_COMPLIANT":
-                non_compliant_count += 1
-                vm_id = item.get("vm")
-                non_compliant_list.append(
-                    {
-                        "vm_id": vm_id,
-                        "vm_name": vm_map.get(vm_id, "UNKNOWN"),
-                        "compliance_status": status,
-                        "policy_id": item.get("policy"),
-                    }
-                )
-            else:
-                unknown_count += 1
-
-        return {
-            "non_compliant": non_compliant_list,
-            "compliant_count": compliant_count,
-            "non_compliant_count": non_compliant_count,
-            "unknown_count": unknown_count,
-        }
 
 
 # ── Domain 8: Inventory & Configuration ───────────────────────────────────────────
