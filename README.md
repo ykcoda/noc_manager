@@ -286,15 +286,14 @@ Streamlit (app.py)
 
 ## Recent Enhancements (Feb 2026)
 
-### Pydantic v2 Migration
-All dependencies updated to versions with full Pydantic v2 support (no pydantic.v1 compatibility layer):
-- ✅ **Upgraded LangChain:** `>=1.5.0` (native Pydantic v2)
-- ✅ **Upgraded LangChain-OpenAI:** `>=0.7.0` (Pydantic v2 native)
-- ✅ **Explicit Pydantic:** `>=2.7.0` (modern Pydantic without v1 compat)
-- ✅ **Resolved warnings:** No more `pydantic.v1` compatibility layer warnings
-- ✅ **Python 3.15+ ready:** Eliminates `UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater`
+### Pydantic v2 Compatibility
+Dependency bounds updated to support Pydantic v2 with pragmatic version constraints:
+- ✅ **Pinned Pydantic:** `>=2.0.0,<3.0` (native Pydantic v2)
+- ✅ **Explicit langchain-core:** `>=0.3.0` (Pydantic v2 support)
+- ✅ **Python version constraint:** `>=3.11,<3.14` (avoids pydantic.v1 compat layer with 3.14+)
+- ⚠️ **Known limitation:** Upstream dependencies (LangChain 1.2.x) still use pydantic.v1 compat shim; warning appears on Python 3.14+
 
-This ensures compatibility with the latest Python versions (including 3.15 alpha) without the deprecated Pydantic v1 compatibility layer.
+**Upgrade path:** When LangChain 2.0 fully migrates to Pydantic v2 native APIs (Q2 2026+), this constraint will be removed and Python 3.15+ will be supported natively without warnings.
 
 ### Endpoint & Integration Fixes
 All 27 vCenter tools verified operational with corrected API paths and response parsing:
@@ -424,7 +423,7 @@ docker compose logs noc-app
 |---|---|---|
 | vCenter | 7.0+ REST API | All power-state filters applied client-side |
 | SolarWinds | SWIS JSON API | Port 17774 |
-| Python | 3.11+ | Full Pydantic v2 support (no pydantic.v1 compat layer) |
+| Python | 3.11–3.13 | LangChain 1.2.x uses pydantic.v1 compat; 3.14+ requires LangChain 2.0 (future) |
 | Docker | 20.10+ | Multi-stage build support |
 | OpenAI | gpt-4o-mini available | GPT-4 supported; adjust SYSTEM_PROMPT if using different model |
 
