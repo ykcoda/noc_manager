@@ -286,6 +286,16 @@ Streamlit (app.py)
 
 ## Recent Enhancements (Feb 2026)
 
+### Pydantic v2 Migration
+All dependencies updated to versions with full Pydantic v2 support (no pydantic.v1 compatibility layer):
+- ✅ **Upgraded LangChain:** `>=1.5.0` (native Pydantic v2)
+- ✅ **Upgraded LangChain-OpenAI:** `>=0.7.0` (Pydantic v2 native)
+- ✅ **Explicit Pydantic:** `>=2.7.0` (modern Pydantic without v1 compat)
+- ✅ **Resolved warnings:** No more `pydantic.v1` compatibility layer warnings
+- ✅ **Python 3.15+ ready:** Eliminates `UserWarning: Core Pydantic V1 functionality isn't compatible with Python 3.14 or greater`
+
+This ensures compatibility with the latest Python versions (including 3.15 alpha) without the deprecated Pydantic v1 compatibility layer.
+
 ### Endpoint & Integration Fixes
 All 27 vCenter tools verified operational with corrected API paths and response parsing:
 
@@ -414,7 +424,7 @@ docker compose logs noc-app
 |---|---|---|
 | vCenter | 7.0+ REST API | All power-state filters applied client-side |
 | SolarWinds | SWIS JSON API | Port 17774 |
-| Python | 3.11+ | Pydantic v1 compatibility |
+| Python | 3.11+ | Full Pydantic v2 support (no pydantic.v1 compat layer) |
 | Docker | 20.10+ | Multi-stage build support |
 | OpenAI | gpt-4o-mini available | GPT-4 supported; adjust SYSTEM_PROMPT if using different model |
 
