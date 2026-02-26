@@ -453,6 +453,36 @@ The vCenter REST API has some limitations vs. SOAP:
 - **Custom fields:** Not supported in REST API
 - **Advanced scheduling:** Not available for scheduled tasks
 
+### vCenter 9 Compatibility
+
+This project is tested against vCenter 7.0, 8.0, and 9.x. API endpoint paths are stable across these versions, but if you encounter 404 errors on specific tools, use the **API Diagnostic Tool** to identify which endpoints are available in your environment:
+
+```bash
+# Activate virtual environment
+source .venv/bin/activate
+
+# Run the diagnostic tool
+python scripts/diagnose_vcenter_api.py
+```
+
+This script probes all critical endpoints and reports:
+- ✅ **HTTP 200** — Endpoint working normally
+- ⚠️ **HTTP 4xx/5xx** — Endpoint exists but has an error (may require special privileges)
+- ❌ **Connection error** — Endpoint unreachable
+
+**Example output:**
+```
+Audit & Event
+─────────────────────
+✅ /api/vcenter/event                HTTP 200      OK
+⚠️ /api/vcenter/audit-records        HTTP 404      Not Found
+```
+
+If you see 404 errors:
+1. The endpoint may not exist in your vCenter version — this is usually OK, the tool will report the error gracefully
+2. You may lack permissions — check vCenter user privileges (e.g., `Global.Diagnostics` for session listing)
+3. The endpoint path may have changed in your vCenter version — file an issue with your diagnostic output and vCenter version
+
 ---
 
 ## Support & Development
