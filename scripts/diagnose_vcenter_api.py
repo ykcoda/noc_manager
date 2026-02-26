@@ -72,18 +72,25 @@ def main():
         "Appliance Health": [
             ("/api/appliance/health/overall", "GET"),
             ("/api/appliance/system/version", "GET"),
+            ("/api/vcenter/appliance/health", "GET"),  # vCenter 9 alternative
+            ("/api/vcenter/appliance/system", "GET"),  # vCenter 9 alternative
         ],
         "Event & Audit": [
             ("/api/vcenter/event", "GET"),
             ("/api/vcenter/audit-records", "GET"),
             ("/api/vcenter/audit", "GET"),  # Alternative path
+            ("/api/appliance/auditlog", "GET"),  # vCenter 9 alternative
+            ("/api/appliance/event-log", "GET"),  # vCenter 9 alternative
         ],
         "Sessions": [
             ("/api/cis/session/list", "POST"),
             ("/api/vcenter/session", "GET"),
+            ("/api/cis/session", "GET"),  # vCenter 9 alternative
+            ("/api/appliance/sessions", "GET"),  # vCenter 9 alternative
         ],
         "Tasks": [
             ("/api/cis/tasks", "GET"),
+            ("/api/vcenter/tasks", "GET"),  # vCenter 9 alternative
         ],
         "Authorization": [
             ("/api/vcenter/authorization/role", "GET"),
@@ -99,7 +106,9 @@ def main():
         ],
         "Networks": [
             ("/api/vcenter/vds/switch", "GET"),
+            ("/api/vcenter/vds/switches", "GET"),  # plural form
             ("/api/vcenter/distributed-switch", "GET"),
+            ("/api/vcenter/network", "GET"),  # generic alternative
         ],
         "Clusters": [
             ("/api/vcenter/cluster", "GET"),

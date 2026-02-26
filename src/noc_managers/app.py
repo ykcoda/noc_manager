@@ -140,6 +140,19 @@ Structure every answer as:
 
 Always call at least one tool before responding. If the question spans both \
 domains, call tools from both servers.
+
+## vCenter 9 Compatibility Note
+On vCenter 9, the following tools may return 404 errors (APIs were removed):
+- query_vcenter_events — event stream unavailable
+- get_active_sessions — session listing unavailable
+- get_recent_tasks — task history unavailable
+- get_vcenter_appliance_health — appliance health API unavailable
+- get_distributed_switch_details — DVS API deprecated
+
+These tools will return error dicts explaining the unavailability. Use available
+tools like list_vms_health, list_esxi_host_health, list_datastore_capacity,
+get_capacity_planning_report, and list_virtual_networks for comprehensive
+infrastructure observability.
 """
 
 _MCP_CONNECTIONS = {

@@ -455,33 +455,32 @@ The vCenter REST API has some limitations vs. SOAP:
 
 ### vCenter 9 Compatibility
 
-This project is tested against vCenter 7.0, 8.0, and 9.x. API endpoint paths are stable across these versions, but if you encounter 404 errors on specific tools, use the **API Diagnostic Tool** to identify which endpoints are available in your environment:
+**⚠️ Known Limitation:** vCenter 9 removed several REST API endpoints that are used by some tools. Use the diagnostic tool to identify which tools will work in your environment:
 
 ```bash
-# Activate virtual environment
 source .venv/bin/activate
-
-# Run the diagnostic tool
 python scripts/diagnose_vcenter_api.py
 ```
 
-This script probes all critical endpoints and reports:
-- ✅ **HTTP 200** — Endpoint working normally
-- ⚠️ **HTTP 4xx/5xx** — Endpoint exists but has an error (may require special privileges)
-- ❌ **Connection error** — Endpoint unreachable
+**vCenter 9 API Status** (confirmed Feb 2026):
 
-**Example output:**
-```
-Audit & Event
-─────────────────────
-✅ /api/vcenter/event                HTTP 200      OK
-⚠️ /api/vcenter/audit-records        HTTP 404      Not Found
-```
+| Endpoint Category | Status | Tools Affected |
+|---|---|---|
+| **Inventory & Capacity** | ✅ Working | `list_vms_health`, `list_esxi_host_health`, `list_datastore_capacity`, `get_capacity_planning_report`, `list_virtual_networks` |
+| **Events & Audit** | ❌ Broken | `query_vcenter_events()` — endpoints `/api/vcenter/event`, `/api/vcenter/audit-records` removed |
+| **Sessions** | ❌ Broken | `get_active_sessions()` — endpoints `/api/cis/session/list`, `/api/vcenter/session` removed |
+| **Tasks** | ❌ Broken | `get_recent_tasks()` — endpoint `/api/cis/tasks` removed |
+| **Appliance Health** | ❌ Broken | `get_vcenter_appliance_health()` — most `/api/appliance/health/*` endpoints removed |
+| **DVS Details** | ⚠️ Deprecated | `get_distributed_switch_details()` — endpoint `/api/vcenter/vds/switch` removed; use `list_virtual_networks()` instead |
+| **Authorization** | ✅ Fixed | `list_roles_and_privileges()` — works using plural forms: `/api/vcenter/authorization/roles`, `/api/vcenter/authorization/privileges` |
 
-If you see 404 errors:
-1. The endpoint may not exist in your vCenter version — this is usually OK, the tool will report the error gracefully
-2. You may lack permissions — check vCenter user privileges (e.g., `Global.Diagnostics` for session listing)
-3. The endpoint path may have changed in your vCenter version — file an issue with your diagnostic output and vCenter version
+**Workaround:** The agent gracefully handles 404 responses. For full infrastructure visibility on vCenter 9, use these tools:
+- **Inventory:** `list_vms_health`, `list_esxi_host_health`, `list_datastore_capacity`, `list_virtual_networks`
+- **Capacity Planning:** `get_capacity_planning_report`, `list_vms_with_high_cpu_allocation`, `get_vmtools_status_report`
+- **Configuration:** `get_vcenter_inventory_summary`, `list_resource_pools`, `list_storage_policies`, `get_storage_policy_compliance`
+- **Security & RBAC:** `list_roles_and_privileges`, `list_global_permissions`, `check_host_lockdown_mode`
+
+**Report Issues:** If you find other broken endpoints or API paths, run the diagnostic tool and file an issue with the output and your vCenter version.
 
 ---
 

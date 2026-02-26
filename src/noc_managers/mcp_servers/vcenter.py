@@ -1086,24 +1086,17 @@ def list_virtual_networks() -> list:
     Each record contains:
       - name, network_id, type
         (STANDARD_PORTGROUP | DISTRIBUTED_PORTGROUP | OPAQUE_NETWORK)
+      - dvs_name (for DISTRIBUTED_PORTGROUP only, if available)
 
-    The vds/switch endpoint (GET /api/vcenter/vds/switch) is also called to
-    augment DVS port groups with their parent switch name when available.
+    Note: vCenter 9 deprecated the /api/vcenter/vds/switch endpoint.
+    DVS parent names are extracted from the network's backing.switch field
+    when available via the main network endpoint.
     """
     with _vcenter_session() as client:
         # Fetch networks
         networks_resp = client.get("/api/vcenter/network")
         networks_resp.raise_for_status()
         networks = networks_resp.json()
-
-        # Fetch DVS list to build name map
-        dvs_resp = _safe_get(client, "/api/vcenter/vds/switch")
-        dvs_map = {}
-        if not (isinstance(dvs_resp, dict) and "error" in dvs_resp):
-            dvs_list = (
-                dvs_resp if isinstance(dvs_resp, list) else dvs_resp.get("value", [])
-            )
-            dvs_map = {dvs.get("switch"): dvs.get("name", "") for dvs in dvs_list}
 
         result = []
         for network in networks:
@@ -1112,11 +1105,11 @@ def list_virtual_networks() -> list:
                 "network_id": network.get("network"),
                 "type": network.get("type"),
             }
-            # Add DVS parent name for distributed port groups
+            # For distributed port groups, extract DVS switch ID from backing
             if network.get("type") == "DISTRIBUTED_PORTGROUP":
                 dvs_id = network.get("backing", {}).get("switch")
-                if dvs_id and dvs_id in dvs_map:
-                    entry["dvs_name"] = dvs_map[dvs_id]
+                if dvs_id:
+                    entry["dvs_switch_id"] = dvs_id
             result.append(entry)
 
         return result
@@ -1127,18 +1120,23 @@ def get_distributed_switch_details(dvs_id: str) -> dict:
     """
     Returns detailed configuration for a single Distributed Virtual Switch.
 
-    Endpoints used:
-      GET /api/vcenter/vds/switch/{dvs_id} — detailed config
+    Note: The /api/vcenter/vds/switch endpoint was deprecated in vCenter 9.
+    This tool attempts to fetch details but may return 404 errors on newer
+    vCenter versions. Use list_virtual_networks() to enumerate DVS port groups
+    and their switch IDs instead.
+
+    Endpoint used:
+      GET /api/vcenter/vds/switch/{dvs_id} — detailed config (vCenter 7.0–8.0)
 
     Args:
       dvs_id: DVS managed object reference (e.g. 'dvs-15'), obtained from
-              the 'network_id' field of list_virtual_networks() for
-              DISTRIBUTED_PORTGROUP entries, or from vCenter inventory.
+              the dvs_switch_id field of list_virtual_networks() for
+              DISTRIBUTED_PORTGROUP entries.
 
     Returns dict with: dvs_id, name, num_ports, uplink_names, mtu,
     discovery_protocol, num_hosts.
 
-    Returns {"error": ..., "status_code": 404} if dvs_id is not found.
+    Returns {"error": ..., "status_code": 404} if endpoint unavailable (vCenter 9+).
     """
     if not dvs_id or not dvs_id.strip():
         return {"error": "dvs_id parameter is required and cannot be empty", "status_code": None}
